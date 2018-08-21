@@ -1,0 +1,25 @@
+#!/usr/bin/python
+import sys
+import os
+from PIL import Image
+
+if len(sys.argv) != 3:
+    print "Usage: {} output.bin output_images".format(sys.argv[0])
+    sys.exit(1)
+
+try:
+    os.stat(sys.argv[2])
+except:
+    os.mkdir(sys.argv[2])
+
+imgsz = 224 * 224 * 3
+with open(sys.argv[1], "rb") as f:
+    imgs = f.read()
+    if len(imgs) % imgsz != 0:
+        print "bin file is corrupted."
+        sys.exit(1)
+    nimg = len(imgs) / imgsz
+    for i in range(nimg):
+        img = Image.frombytes("RGB", (224, 224), imgs[i * imgsz : (i + 1) * imgsz])
+        img.save("{}/{}.png".format(sys.argv[2], i))
+print "{} images are converted.".format(nimg)

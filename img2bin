@@ -1,0 +1,24 @@
+#!/usr/bin/python
+import sys
+import glob
+from PIL import Image
+
+if len(sys.argv) != 3:
+    print "Usage: {} images input.bin".format(sys.argv[0])
+    sys.exit(1)
+
+desired_size = 224
+imgs = []
+fns = sorted(glob.glob("{}/*".format(sys.argv[1])))
+for imgfn in fns:
+    img = Image.open(imgfn)
+    ratio = float(desired_size) / max(img.size)
+    new_size = [int(x * ratio) for x in img.size]
+    img.thumbnail(new_size, Image.BICUBIC)
+    new_img = Image.new("RGB", (desired_size, desired_size))
+    new_img.paste(img, ((desired_size - new_size[0]) // 2, (desired_size - new_size[1]) // 2))
+    imgs.append(new_img.tobytes())
+
+with open(sys.argv[2], "wb") as f:
+    f.write("".join(imgs))
+print "{} images are converted.".format(len(fns))
