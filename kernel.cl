@@ -1,3 +1,7 @@
+#define RELU 0
+#define SIGMOID 1
+#define NONE 2
+
 __kernel void conv(
         __global float *in,
         __global float *out,
@@ -19,12 +23,16 @@ __kernel void fc(
 
 }
 
-__kernel void ReLU(__local float *inout, int CHW){
-    //TODO: out = fmaxf(in, 0);
-}
-
-__kernel void sigmoid(__local float *inout, int CHW){
-    //TODO: out = 1 / (1 + exp(-in));
+__kernel void activation(int type, __local float *inout, int CHW){
+    int Z_size = get_global_size(0);
+    int X_size = get_global_size(1);
+    int Y_size = get_global_size(2);
+    int index = get_global_id(0) * Z_size + get_global_id(1) * X_size + get_global_id(2) * Y_size;
+    if(index < CHW)
+        if(type == RELU)
+            inout[index] = fmax(inout[index], 0);
+        else if(type == SIGMOID)
+            inout[index] = 1 / (1 + exp(-inout[index]));
 }
 
 /*** These fuctions might not be used in kernel ***/
