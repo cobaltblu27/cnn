@@ -18,6 +18,28 @@ __kernel void conv(
         int act_func_type
         ){
     
+	int HOUT = H / stride, WOUT = W / stride;
+	int CHW = C*HOUT*WOUT;
+	int wout = get_global_id(0);
+	int hout = get_global_id(1);
+	int k = get_global_id(2);
+	
+	if( k < K && hout < HOUT && wout < WOUT) {
+		float sum = bias[k];
+		for (int c = 0; c < C; ++c) {
+			for (int r = 0; r < 3; ++r) {
+				for (int s = 0; s < 3; ++s)P {
+					// calculate position in input image
+					int h = ho
+                    int h = hout * stride + r - 1;
+                    int w = wout * stride + s - 1;
+                    if (h < 0 || h >= H || w < 0 || w >= W) {
+                     // out of bound, do nothing
+                    } else {
+                        sum += in[c * H * W + h * W + w] * weight[k * C * 3 * 3 + c * 3 * 3 + r * 3 + s];
+					}
+         out[k * HOUT * WOUT + hout * WOUT + wout] = sum;
+	}
     activation(act_func_type, out, K, Hout, Wout);
 }
 
@@ -72,7 +94,7 @@ __kernel void fuse(
  * in : (C, H, W)
  * out : (C, H * 2, W * 2)
  */
-__kernal void up_sample(
+__kernal void upsample(
         __global float *in,
         __global float *out,
         int H, int W, int C

@@ -15,7 +15,10 @@ cl_context context;
 cl_uint err;
 cl_command_queue queue;
 cl_program program;
-cl_kernel kernel;
+cl_kernel kernel_conv;
+cl_kernel kernel_fc;
+cl_kernel kernel_fuse;
+cl_kernel kernel_upsample;
 
 void colorizer_init() {
     /*
@@ -56,9 +59,20 @@ void colorizer_init() {
     }
 
     //create kernel
-    kernel = clCreateKernel(program, "colorize", &err);
+    kernel_conv = clCreateKernel(program, "conv", &err);
+    kernel_fc = clCreateKernel(program, "fc", &err);
+    kernel_fuse = clCreateKernel(program, "fuse", &err);
+    kernel_upsample = clCreateKernel(program, "upsample", &err);
     CHECK_ERROR(err);
 
+}
+
+cl_men ClCreateBuffer(cl_context context, cl_mem_flags flags, size_t size, void *host_ptr, cl_int *errcode_ret)
+{
+	cl_mem buf;
+	buf = clCreateBuffer(context, flags, size, host_ptr, errcode_ret);
+	CHECK_ERROR(*errcode_ret);
+	return buf;
 }
 
 int align(int num, int bound){ 
@@ -87,30 +101,30 @@ static void conv(cl_mem in_buff, cl_mem out_buff,
     size_t local_size[3] = {1, 16, 16};
    
     //pass arguements
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &in_buff);
+    err = clSetKernelArg(kernel_conv, 0, sizeof(cl_mem), &in_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &out_buff);
+    err = clSetKernelArg(kernel_conv, 1, sizeof(cl_mem), &out_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &weight_buff);
+    err = clSetKernelArg(kernel_conv, 2, sizeof(cl_mem), &weight_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 3, sizeof(cl_mem), &bias_buff);
+    err = clSetKernelArg(kernel_conv, 3, sizeof(cl_mem), &bias_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 4, sizeof(int), &H);
+    err = clSetKernelArg(kernel_conv, 4, sizeof(int), &H);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 5, sizeof(int), &W);
+    err = clSetKernelArg(kernel_conv, 5, sizeof(int), &W);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 6, sizeof(int), &K);
+    err = clSetKernelArg(kernel_conv, 6, sizeof(int), &K);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 7, sizeof(int), &C);
+    err = clSetKernelArg(kernel_conv, 7, sizeof(int), &C);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 8, sizeof(int), &stride);
+    err = clSetKernelArg(kernel_conv, 8, sizeof(int), &stride);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 9, sizeof(int), &act_func_type);
+    err = clSetKernelArg(kernel_conv, 9, sizeof(int), &act_func_type);
     CHECK_ERROR(err);
 
     //run kernel
     err = clEnqueueNDRangeKernel(
-            queue, kernel, 3,
+            queue, kernel_conv, 3,
             NULL, global_size, local_size,
             0, NULL, NULL
             );
@@ -140,23 +154,23 @@ static void fc(cl_mem in_buff, cl_mem out_buff,
     size_t local_size[3] = {256, 1, 1};
    
     //pass arguements
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &in_buff);
+    err = clSetKernelArg(kernel_fc, 0, sizeof(cl_mem), &in_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &out_buff);
+    err = clSetKernelArg(kernel_fc, 1, sizeof(cl_mem), &out_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &weight_buff);
+    err = clSetKernelArg(kernel_fc, 2, sizeof(cl_mem), &weight_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 3, sizeof(cl_mem), &bias_buff);
+    err = clSetKernelArg(kernel_fc, 3, sizeof(cl_mem), &bias_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 4, sizeof(int), &K);
+    err = clSetKernelArg(kernel_fc, 4, sizeof(int), &K);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 5, sizeof(int), &C);
+    err = clSetKernelArg(kernel_fc, 5, sizeof(int), &C);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 6, sizeof(int), &act_func_type);
+    err = clSetKernelArg(kernel_fc, 6, sizeof(int), &act_func_type);
     CHECK_ERROR(err);
 
     err = clEnqueueNDRangeKernel(
-            queue, kernel, 3,
+            queue, kernel_fc, 3,
             NULL, global_size, local_size,
             0, NULL, NULL
             );
@@ -173,15 +187,15 @@ static void fuse(cl_mem ml, cl_mem fg, cl_mem out){
     size_t local_size[3] = {1, 16, 16};
    
     //pass arguements
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &ml);
+    err = clSetKernelArg(kernel_fuse, 0, sizeof(cl_mem), &ml);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &fg);
+    err = clSetKernelArg(kernel_fuse, 1, sizeof(cl_mem), &fg);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &out);
+    err = clSetKernelArg(kernel_fuse, 2, sizeof(cl_mem), &out);
     CHECK_ERROR(err);
 
     err = clEnqueueNDRangeKernel(
-            queue, kernel, 3,
+            queue, kernel_fuse, 3,
             NULL, global_size, local_size,
             0, NULL, NULL
             );
@@ -198,23 +212,23 @@ static void upsample(cl_mem in_buff, cl_mem out_buff,
     size_t local_size[3] = {1, 16, 16};
    
     //pass arguements
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &in_buff);
+    err = clSetKernelArg(kernel_upsample, 0, sizeof(cl_mem), &in_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &out_buff);
+    err = clSetKernelArg(kernel_upsample, 1, sizeof(cl_mem), &out_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &weight_buff);
+    err = clSetKernelArg(kernel_upsample, 2, sizeof(cl_mem), &weight_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 3, sizeof(cl_mem), &bias_buff);
+    err = clSetKernelArg(kernel_upsample, 3, sizeof(cl_mem), &bias_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 4, sizeof(int), &K);
+    err = clSetKernelArg(kernel_upsample, 4, sizeof(int), &K);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 5, sizeof(int), &C);
+    err = clSetKernelArg(kernel_upsample, 5, sizeof(int), &C);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel, 6, sizeof(int), &act_func_type);
+    err = clSetKernelArg(kernel_upsample, 6, sizeof(int), &act_func_type);
     CHECK_ERROR(err);
 
     err = clEnqueueNDRangeKernel(
-            queue, kernel, 3,
+            queue, kernel_upsample, 3,
             NULL, global_size, local_size,
             0, NULL, NULL
             );
@@ -261,7 +275,7 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
      * and 3 by 3 filter
      * H and W stands for height and width
      */
-
+	
     cl_mem ll_conv1_w = create_network_buffer(64 * 1 * 3 * 3, &network);
     cl_mem ll_conv1_b = create_network_buffer(64, &network);
     cl_mem ll_conv2_w = create_network_buffer(128 * 64 * 3 * 3, &network);
@@ -306,31 +320,39 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     cl_mem co_conv6_b = create_network_buffer(2, &network);
 
     // intermediate buffer for feature maps
-    cl_mem ll_fm1 = clCreateBuffer(context, 0, 64 * 112 * 112 * sizeof(float), NULL, &err);
-    cl_mem ll_fm2 = clCreateBuffer(context, 0, 128 * 112 * 112 * sizeof(float), NULL, &err);
-    cl_mem ll_fm3 = clCreateBuffer(context, 0, 128 * 56 * 56 * sizeof(float), NULL, &err);
-    cl_mem ll_fm4 = clCreateBuffer(context, 0, 256 * 56 * 56 * sizeof(float), NULL, &err);
-    cl_mem ll_fm5 = clCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem ll_fm6 = clCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem ml_fm1 = clCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem ml_fm2 = clCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem gf_fm1 = clCreateBuffer(context, 0, 512 * 14 * 14 * sizeof(float), NULL, &err);
-    cl_mem gf_fm2 = clCreateBuffer(context, 0, 512 * 14 * 14 * sizeof(float), NULL, &err);
-    cl_mem gf_fm3 = clCreateBuffer(context, 0, 512 * 7 * 7 * sizeof(float), NULL, &err);
-    cl_mem gf_fm4 = clCreateBuffer(context, 0, 512 * 7 * 7 * sizeof(float), NULL, &err);
-    cl_mem gf_fm5 = clCreateBuffer(context, 0, 1024 * sizeof(float), NULL, &err);
-    cl_mem gf_fm6 = clCreateBuffer(context, 0, 512 * sizeof(float), NULL, &err);
-    cl_mem gf_fm7 = clCreateBuffer(context, 0, 256 * sizeof(float), NULL, &err);
-    cl_mem ml_gf_fused_fm = clCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem co_fm1 = clCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem co_fm2 = clCreateBuffer(context, 0, 128 * 28 * 28 * sizeof(float), NULL, &err);
-    cl_mem co_fm3 = clCreateBuffer(context, 0, 128 * 56 * 56 * sizeof(float), NULL, &err);
-    cl_mem co_fm4 = clCreateBuffer(context, 0, 64 * 56 * 56 * sizeof(float), NULL, &err);
-    cl_mem co_fm5 = clCreateBuffer(context, 0, 64 * 56 * 56 * sizeof(float), NULL, &err);
-    cl_mem co_fm6 = clCreateBuffer(context, 0, 64 * 112 * 112 * sizeof(float), NULL, &err);
-    cl_mem co_fm7 = clCreateBuffer(context, 0, 32 * 112 * 112 * sizeof(float), NULL, &err);
+    cl_mem ll_fm1 = ClCreateBuffer(context, 0, 64 * 112 * 112 * sizeof(float), NULL, &err);
+    cl_mem ll_fm2 = ClCreateBuffer(context, 0, 128 * 112 * 112 * sizeof(float), NULL, &err);
+    cl_mem ll_fm3 = ClCreateBuffer(context, 0, 128 * 56 * 56 * sizeof(float), NULL, &err);
+    cl_mem ll_fm4 = ClCreateBuffer(context, 0, 256 * 56 * 56 * sizeof(float), NULL, &err);
+    cl_mem ll_fm5 = ClCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem ll_fm6 = ClCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem ml_fm1 = ClCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem ml_fm2 = ClCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem gf_fm1 = ClCreateBuffer(context, 0, 512 * 14 * 14 * sizeof(float), NULL, &err);
+    cl_mem gf_fm2 = ClCreateBuffer(context, 0, 512 * 14 * 14 * sizeof(float), NULL, &err);
+    cl_mem gf_fm3 = ClCreateBuffer(context, 0, 512 * 7 * 7 * sizeof(float), NULL, &err);
+    cl_mem gf_fm4 = ClCreateBuffer(context, 0, 512 * 7 * 7 * sizeof(float), NULL, &err);
+    cl_mem gf_fm5 = ClCreateBuffer(context, 0, 1024 * sizeof(float), NULL, &err);
+    cl_mem gf_fm6 = ClCreateBuffer(context, 0, 512 * sizeof(float), NULL, &err);
+    cl_mem gf_fm7 = ClCreateBuffer(context, 0, 256 * sizeof(float), NULL, &err);
+    cl_mem ml_gf_fused_fm = ClCreateBuffer(context, 0, 512 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem co_fm1 = ClCreateBuffer(context, 0, 256 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem co_fm2 = ClCreateBuffer(context, 0, 128 * 28 * 28 * sizeof(float), NULL, &err);
+    cl_mem co_fm3 = ClCreateBuffer(context, 0, 128 * 56 * 56 * sizeof(float), NULL, &err);
+    cl_mem co_fm4 = ClCreateBuffer(context, 0, 64 * 56 * 56 * sizeof(float), NULL, &err);
+    cl_mem co_fm5 = ClCreateBuffer(context, 0, 64 * 56 * 56 * sizeof(float), NULL, &err);
+    cl_mem co_fm6 = ClCreateBuffer(context, 0, 64 * 112 * 112 * sizeof(float), NULL, &err);
+    cl_mem co_fm7 = ClCreateBuffer(context, 0, 32 * 112 * 112 * sizeof(float), NULL, &err);
 
     // run network for each image
+	//
+	//
+	// Please put images into buffers in advance
+	//
+	//
+
+    cl_mem init_buf = ClCreateBuffer(context, 0, 224 * 224 * 1 * sizeof(float), NULL, &err);
+	
     for (int n = 0; n < nimg; ++n) {
         /*
          *  static void conv(cl_mem &in_buff, cl_mem &out_buff,
@@ -341,7 +363,7 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
          *  in : (C, H, W)
          *  out : (K, H / stride, W / stride)
          *
-         */
+         */			
         float *input = inputs + n * 224 * 224;
         float *output = outputs + n * 2 * 112 * 112;
         conv(input, ll_fm1, ll_conv1_w, ll_conv1_b, 224, 224, 64, 1, 2, RELU);
@@ -377,7 +399,10 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
 
     //TODO release all that buffers
     free(source_code);
-    clReleaseKernel(kernel);
+    clReleaseKernel(kernel_conv);
+    clReleaseKernel(kernel_fc);
+    clReleaseKernel(kernel_fuse);
+    clReleaseKernel(kernel_upsample);
     clReleaseProgram(program);
     clReleaseCommandQueue(queue);
     clReleaseContext(context);
