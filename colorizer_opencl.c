@@ -136,12 +136,14 @@ cm_mem buffer_init(float *in, int H, int W){
 }
 
 static void fc(float *in, float *out, float *weight,
-            float *bias, int K, int C, int act_func_type, int CHW
+            float *bias, int K, int C, int act_func_type
         ){
     //TODO: implement with opencl
-
+    // will implement with 3-demention workgroup
+    // global_size[1] and global_size[1] will be 1 and 
+    // total global size will be same as size of output
     err = clEnqueueNDRangeKernel(
-            queue, kernel, 2,
+            queue, kernel, 3,
             NULL, global_size, local_size,
             0, NULL, NULL
             );
@@ -298,12 +300,9 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
         conv(gf_fm1, gf_fm2, gf_conv2_w, gf_conv2_b, 14, 14, 512, 512, 1, RELU);
         conv(gf_fm2, gf_fm3, gf_conv3_w, gf_conv3_b, 14, 14, 512, 512, 2, RELU);
         conv(gf_fm3, gf_fm4, gf_conv4_w, gf_conv4_b, 7, 7, 512, 512, 1, RELU);
-        fc(gf_fm4, gf_fm5, gf_fc1_w, gf_fc1_b, 1024, 25088);
-        relu(gf_fm5, 1024);
-        fc(gf_fm5, gf_fm6, gf_fc2_w, gf_fc2_b, 512, 1024);
-        relu(gf_fm6, 512);
-        fc(gf_fm6, gf_fm7, gf_fc3_w, gf_fc3_b, 256, 512);
-        relu(gf_fm7, 256);
+        fc(gf_fm4, gf_fm5, gf_fc1_w, gf_fc1_b, 1024, 25088, RELU);
+        fc(gf_fm5, gf_fm6, gf_fc2_w, gf_fc2_b, 512, 1024, RELU);
+        fc(gf_fm6, gf_fm7, gf_fc3_w, gf_fc3_b, 256, 512, RELU);
 
         fuse(ml_fm2, gf_fm7, ml_gf_fused_fm);
 

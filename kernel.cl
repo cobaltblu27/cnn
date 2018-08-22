@@ -2,33 +2,50 @@
 #define SIGMOID 1
 #define NONE 2
 
+/*
+ * Convolution Layer
+ * in : (C, H, W)
+ * out : (K, H / stride, W / stride)
+ * weight : (K, C, 3, 3)
+ * bias : (K)
+ */
 __kernel void conv(
         __global float *in,
         __global float *out,
         __global float *weight, 
         __global float *bias,
         int H, int W, int K, int C,
-        int act_func_type, int CHW
+        int act_func_type
         ){
-
+    
+    activation(act_func_type, out, K, Hout, Wout);
 }
 
+//input size: C, weight size: C * K, output size: K
 __kernel void fc(
         __global float *in,
         __global float *out,
         __global float *weight, 
         __global float *bias,
-        int K, int C, int act_func_type, int CHW
+        int K, int C, int act_func_type
         ){
-
+    k = get_global_id(0);
+    if(k < K){
+        float sum = bias[k];
+        for(int c = 0; c < C; c++)
+            sum += weight[C * k + c] * in[c];
+        out[k] = sum;
+    }
+    activation(act_func_type, out, K, 1, 1);
 }
 
-__kernel void activation(int type, __local float *inout, int CHW){
-    int Z_size = get_global_size(0);
-    int X_size = get_global_size(1);
-    int Y_size = get_global_size(2);
-    int index = get_global_id(0) * Z_size + get_global_id(1) * X_size + get_global_id(2) * Y_size;
-    if(index < CHW)
+__kernel void activation(int type, __local float *inout,
+        int size_k, int size_h, int size_w){
+    int k = get_global_id(0);
+    int h = get_global_id(1);
+    int w = get_global_id(2);
+    int index = k * size_h * size_w + h * size_w + w;
+    if(k < size_k && h < size_h && w < size_w)
         if(type == RELU)
             inout[index] = fmax(inout[index], 0);
         else if(type == SIGMOID)
