@@ -36,10 +36,10 @@ __kernel void conv(
     
 	int HOUT = H / stride, WOUT = W / stride;
 	int CHW = C*HOUT*WOUT;
-	int wout = get_global_id(0);
+	int k = get_global_id(0);
 	int hout = get_global_id(1);
-	int k = get_global_id(2);
-	
+    int wout = get_global_id(2);
+
 	if( k < K && hout < HOUT && wout < WOUT) {
 		float sum = bias[k];
 		for (int c = 0; c < C; ++c){
@@ -103,9 +103,9 @@ __kernel void up_sample(
         __global float *out,
         int H, int W, int C
         ){
-    int c = get_global_id(0);
     int h = get_global_id(1);
     int w = get_global_id(2);
+    int c = get_global_id(0);
     if(c < C && h < H && w < W){
         float t = in[c * H * W + h * W + w];
         out[c * H * W * 4 + (2 * h + 0) * W * 2 + (2 * w + 0)] = t;
