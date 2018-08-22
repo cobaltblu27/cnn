@@ -16,146 +16,6 @@ cl_command_queue queue;
 cl_program program;
 cl_kernel kernel;
 
-static void conv(float *in, float *out, float *weight, float *bias,
-            int H, int W, int K, int C, int stride,
-            int act_func_type, int CHW
-        ){
-    int HOUT = H / stride, WOUT = W / stride;
-    //TODO: implement with opencl
-    
-    //make vector and add
-    cl_mem buffA, buffB, buffC;
-
-    //break down matrix into 16x16 matrix
-    int A_row_align = ALIGN(ROW_A);
-    int A_col_align = ALIGN(COL_A);
-    int B_col_align = ALIGN(COL_B);
-    size_t global_size[2] = {A_row_align, B_col_align};    
-    size_t local_size[2] = {16, 16};
-
-    //create buffer 
-    buffA = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * ROW_A * COL_A, NULL, &err);
-    CHECK_ERROR(err);
-    buffB = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * COL_A * COL_B, NULL, &err);
-    CHECK_ERROR(err);
-    
-    //write to buffer
-    err = clEnqueueWriteBuffer(queue, buffA, CL_TRUE, 0, sizeof(float) * COL_A * ROW_A, A, 0, NULL, NULL);
-    CHECK_ERROR(err);
-    err = clEnqueueWriteBuffer(queue, buffB, CL_TRUE, 0, sizeof(float) * COL_A * COL_B, B, 0, NULL, NULL);
-    CHECK_ERROR(err);
-
-
-    buffC = clCreateBuffer(context, 0, sizeof(float) * ROW_A * COL_B, NULL, &err);
-    CHECK_ERROR(err);
-
-    //pass arguements
-    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &buffA);
-    CHECK_ERROR(err);
-
-    //run kernel
-    err = clEnqueueNDRangeKernel(
-            queue, kernel, 2,
-            NULL, global_size, local_size,
-            0, NULL, NULL
-            );
-    CHECK_ERROR(err);
-
-    //pass output
-    err = clEnqueueReadBuffer(queue, buffC, CL_TRUE, 0, sizeof(float) * ROW_A * COL_B, C, 0, NULL, NULL);
-    CHECK_ERROR(err);
-
-}
-
-static void fc(float *in, float *out, float *weight,
-            float *bias, int K, int C, int act_func_type, int CHW
-        ){
-    //TODO: implement with opencl
-
-    err = clEnqueueNDRangeKernel(
-            queue, kernel, 2,
-            NULL, global_size, local_size,
-            0, NULL, NULL
-            );
-    CHECK_ERROR(err);
-
-    err = clEnqueueReadBuffer(queue, buffC, CL_TRUE, 0, sizeof(float) * ROW_A * COL_B, C, 0, NULL, NULL);
-    CHECK_ERROR(err);
-
-}
-
-static void fuse(float *ml, float *fg, float *out){
-    //TODO
-}
-
-static void upsample(float *in, float *out, int H, int W, int C){
-    //TODO
-}
-/*
-// ReLU (in-place)
-// inout : (C, H, W)
-
-static void relu(float *inout, int CHW) {
-    for (int chw = 0; chw < CHW; ++chw) {
-        inout[chw] = fmaxf(inout[chw], 0);
-    }
-}
-
-
-// Sigmoid (in-place)
-// inout : (C, H, W)
-
-static void sigmoid(float *inout, int CHW) {
-    for (int chw = 0; chw < CHW; ++chw) {
-        inout[chw] = 1 / (1 + expf(-inout[chw]));
-    }
-}
-
-// ml : (256, 28, 28)
-// gf : (256)
-// out : (512, 28, 28)
-
-static void fuse(float *ml, float *gf, float *out) {
-    for (int k = 0; k < 256; ++k) {
-        for (int h = 0; h < 28; ++h) {
-            for (int w = 0; w < 28; ++w) {
-                out[k * 28 * 28 + h * 28 + w] = ml[k * 28 * 28 + h * 28 + w];
-            }
-        }
-    }
-    for (int k = 256; k < 512; ++k) {
-        for (int h = 0; h < 28; ++h) {
-            for (int w = 0; w < 28; ++w) {
-                out[k * 28 * 28 + h * 28 + w] = gf[k - 256];
-            }
-        }
-    }
-}
-
-
-// in : (C, H, W)
-// out : (C, H * 2, W * 2)
-static void upsample(float *in, float *out, int H, int W, int C) {
-    for (int c = 0; c < C; ++c) {
-        for (int h = 0; h < H; ++h) {
-            for (int w = 0; w < W; ++w) {
-                float t = in[c * H * W + h * W + w];
-                out[c * H * W * 4 + (2 * h + 0) * W * 2 + (2 * w + 0)] = t;
-                out[c * H * W * 4 + (2 * h + 0) * W * 2 + (2 * w + 1)] = t;
-                out[c * H * W * 4 + (2 * h + 1) * W * 2 + (2 * w + 0)] = t;
-                out[c * H * W * 4 + (2 * h + 1) * W * 2 + (2 * w + 1)] = t;
-            }
-        }
-    }
-}
-*/
-
-/*
- * relu : 
- *   out = fmaxf(in, 0);
- * sigmoid :
- *   out = 1 / (1 + expf(-in));
- */
 void colorizer_init() {
     /*
      * TODO
@@ -200,6 +60,124 @@ void colorizer_init() {
 
 }
 
+int align(int num, int bound){ 
+    return bound * ((num + bound - 1) / bound);
+}
+
+/*
+ * convolution layer
+ * in : (c, h, w)
+ * out : (k, h / stride, w / stride)
+ * weight : (k, c, 3, 3)
+ * bias : (k)
+ */
+static void conv(cl_mem &in_buff, cl_mem &out_buff,
+            cl_mem *weight_buff, cl_mem *bias_buff,
+            int H, int W, int K, int C, int stride,
+            int act_func_type, int CHW,
+        ){
+    int Hout = H / stride, Wout = W / stride;
+    
+    //break down matrix into 16x16 matrix
+    //output matrix will be Wout x Hout
+    int Wout_align = align(Wout, 16);
+    int Hout_align = align(Hout, 16);
+    size_t global_size[3] = {K, Wout_align, Hout_align};    
+    size_t local_size[3] = {1, 16, 16};
+
+   
+    //write to buffer
+    err = clEnqueueWriteBuffer(queue, in_buff, CL_TRUE, 0, sizeof(float) H * W * C, in, 0, NULL, NULL);
+    CHECK_ERROR(err);
+
+    out_buff = clCreateBuffer(context, 0, sizeof(float) * K * Wout * Hout, NULL, &err);
+    CHECK_ERROR(err);
+
+    //pass arguements
+    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &in_buff);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &out_buff);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &weight_buff);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 3, sizeof(cl_mem), &bias_buff);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 4, sizeof(int), &H);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 5, sizeof(int), &W);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 6, sizeof(int), &K);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 7, sizeof(int), &C);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 8, sizeof(int), &stride);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 9, sizeof(int), &act_func_type);
+    CHECK_ERROR(err);
+    err = clSetKernelArg(kernel, 10, sizeof(int), &CHW);
+    CHECK_ERROR(err);
+
+    //run kernel
+    err = clEnqueueNDRangeKernel(
+            queue, kernel, 3,
+            NULL, global_size, local_size,
+            0, NULL, NULL
+            );
+    CHECK_ERROR(err);
+}
+
+cm_mem buffer_init(float *in, int H, int W){
+    //create buffer
+    //TODO
+    in_buff = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * C * W * H, NULL, &err);
+    CHECK_ERROR(err);
+    return in_buff;
+}
+
+static void fc(float *in, float *out, float *weight,
+            float *bias, int K, int C, int act_func_type, int CHW
+        ){
+    //TODO: implement with opencl
+
+    err = clEnqueueNDRangeKernel(
+            queue, kernel, 2,
+            NULL, global_size, local_size,
+            0, NULL, NULL
+            );
+    CHECK_ERROR(err);
+
+    err = clEnqueueReadBuffer(queue, buffC, CL_TRUE, 0, sizeof(float) * ROW_A * COL_B, C, 0, NULL, NULL);
+    CHECK_ERROR(err);
+
+}
+
+static void fuse(float *ml, float *fg, float *out){
+    //TODO
+}
+
+static void upsample(float *in, float *out, int H, int W, int C){
+    //TODO
+}
+/*
+ * relu : 
+ *   out = fmaxf(in, 0);
+ * sigmoid :
+ *   out = 1 / (1 + expf(-in));
+ */
+
+#define FILTER_SIZE 3
+
+cl_mem create_network_buffer(int size, float **network){
+    cl_uint err;
+    cl_mem buff = clCreateBuffer(context, CL_MEM_READ_WRITE,
+            sizeof(float) * size, NULL, &err);
+    CHECK_ERROR(err);
+    err = clEnqueueWriteBuffer(queue, buff, CL_FALSE, 0,
+            sizeof(float) * size, *network, 0, NULL, NULL);
+    CHECK_ERROR(err);
+    *network += size;
+}
+
 void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     /*
      * TODO
@@ -222,48 +200,50 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
      * and 3 by 3 filter
      * H and W stands for height and width
      */
-    float *ll_conv1_w = network; network += 64 * 1 * 3 * 3;
-    float *ll_conv1_b = network; network += 64;
-    float *ll_conv2_w = network; network += 128 * 64 * 3 * 3;
-    float *ll_conv2_b = network; network += 128;
-    float *ll_conv3_w = network; network += 128 * 128 * 3 * 3;
-    float *ll_conv3_b = network; network += 128;
-    float *ll_conv4_w = network; network += 256 * 128 * 3 * 3;
-    float *ll_conv4_b = network; network += 256;
-    float *ll_conv5_w = network; network += 256 * 256 * 3 * 3;
-    float *ll_conv5_b = network; network += 256;
-    float *ll_conv6_w = network; network += 512 * 256 * 3 * 3;
-    float *ll_conv6_b = network; network += 512;
-    float *ml_conv1_w = network; network += 512 * 512 * 3 * 3;
-    float *ml_conv1_b = network; network += 512;
-    float *ml_conv2_w = network; network += 256 * 512 * 3 * 3;
-    float *ml_conv2_b = network; network += 256;
-    float *gf_conv1_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv1_b = network; network += 512;
-    float *gf_conv2_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv2_b = network; network += 512;
-    float *gf_conv3_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv3_b = network; network += 512;
-    float *gf_conv4_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv4_b = network; network += 512;
-    float *gf_fc1_w = network; network += 1024 * 25088;
-    float *gf_fc1_b = network; network += 1024;
-    float *gf_fc2_w = network; network += 512 * 1024;
-    float *gf_fc2_b = network; network += 512;
-    float *gf_fc3_w = network; network += 256 * 512;
-    float *gf_fc3_b = network; network += 256;
-    float *co_conv1_w = network; network += 256 * 512 * 3 * 3;
-    float *co_conv1_b = network; network += 256;
-    float *co_conv2_w = network; network += 128 * 256 * 3 * 3;
-    float *co_conv2_b = network; network += 128;
-    float *co_conv3_w = network; network += 64 * 128 * 3 * 3;
-    float *co_conv3_b = network; network += 64;
-    float *co_conv4_w = network; network += 64 * 64 * 3 * 3;
-    float *co_conv4_b = network; network += 64;
-    float *co_conv5_w = network; network += 32 * 64 * 3 * 3;
-    float *co_conv5_b = network; network += 32;
-    float *co_conv6_w = network; network += 2 * 32 * 3 * 3;
-    float *co_conv6_b = network; network += 2;
+
+
+    cl_mem ll_conv1_w = create_network_buffer(64 * 1 * 3 * 3, &network);
+    cl_mem ll_conv1_b = create_network_buffer(64, &network);
+    cl_mem ll_conv2_w =  create_network_buffer(128 * 64 * 3 * 3, &network);
+    cl_mem ll_conv2_b =  create_network_buffer(128, &network);
+    cl_mem ll_conv3_w =  create_network_buffer(128 * 128 * 3 * 3, &network);
+    cl_mem ll_conv3_b =  create_network_buffer(128, &network);
+    cl_mem ll_conv4_w = create_network_buffer(256 * 128 * 3 * 3, &network);
+    cl_mem ll_conv4_b = create_network_buffer(256, &network); 
+    cl_mem ll_conv5_w = create_network_buffer(256 * 256 * 3 * 3, &network);
+    cl_mem ll_conv5_b = create_network_buffer(256, &network); 
+    cl_mem ll_conv6_w = create_network_buffer(512 * 256 * 3 * 3, &network); 
+    cl_mem ll_conv6_b = create_network_buffer(512, &network); 
+    cl_mem ml_conv1_w = create_network_buffer(512 * 512 * 3 * 3, &network); 
+    cl_mem ml_conv1_b = create_network_buffer(512, &network);
+    cl_mem ml_conv2_w = create_network_buffer(256 * 512 * 3 * 3, &network); 
+    cl_mem ml_conv2_b = create_network_buffer(256, &network); 
+    cl_mem gf_conv1_w = create_network_buffer(512 * 512 * 3 * 3, &network);
+    cl_mem gf_conv1_b = create_network_buffer(512, &network); 
+    cl_mem gf_conv2_w = create_network_buffer(512 * 512 * 3 * 3, &network); 
+    cl_mem gf_conv2_b = create_network_buffer(512, &network); 
+    cl_mem gf_conv3_w = create_network_buffer(512 * 512 * 3 * 3, &network); 
+    cl_mem gf_conv3_b = create_network_buffer(512, &network); 
+    cl_mem gf_conv4_w = create_network_buffer(512 * 512 * 3 * 3, &network);
+    cl_mem gf_conv4_b = create_network_buffer(512, &network); 
+    cl_mem gf_fc1_w = create_network_buffer(1024 * 25088, &network);
+    cl_mem gf_fc1_b = create_network_buffer(1024, &network);
+    cl_mem gf_fc2_w = create_network_buffer(512 * 1024, &network);
+    cl_mem gf_fc2_b = create_network_buffer(512, &network);
+    cl_mem gf_fc3_w = create_network_buffer(256 * 512, &network);
+    cl_mem gf_fc3_b = create_network_buffer(256, &network);
+    cl_mem co_conv1_w = create_network_buffer(256 * 512 * 3 * 3, &network);
+    cl_mem co_conv1_b = create_network_buffer(256, &network);
+    cl_mem co_conv2_w = create_network_buffer(128 * 256 * 3 * 3, &network);
+    cl_mem co_conv2_b = create_network_buffer(128, &network);
+    cl_mem co_conv3_w = create_network_buffer(64 * 128 * 3 * 3, &network);
+    cl_mem co_conv3_b = create_network_buffer(64, &network);
+    cl_mem co_conv4_w = create_network_buffer(64 * 64 * 3 * 3, &network);
+    cl_mem co_conv4_b = create_network_buffer(64, &network);
+    cl_mem co_conv5_w = create_network_buffer(32 * 64 * 3 * 3, &network);
+    cl_mem co_conv5_b = create_network_buffer(32, &network);
+    cl_mem co_conv6_w = create_network_buffer(2 * 32 * 3 * 3, &network);
+    cl_mem co_conv6_b = create_network_buffer(2, &network);
 
     // intermediate buffer for feature maps
     float *ll_fm1 = (float*)malloc(64 * 112 * 112 * sizeof(float));
@@ -285,13 +265,14 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     float *co_fm1 = (float*)malloc(256 * 28 * 28 * sizeof(float));
     float *co_fm2 = (float*)malloc(128 * 28 * 28 * sizeof(float));
     float *co_fm3 = (float*)malloc(128 * 56 * 56 * sizeof(float));
-    float *co_fm4 = (float*)malloc(64 * 56 * 56 * sizeof(float));
-    float *co_fm5 = (float*)malloc(64 * 56 * 56 * sizeof(float));
-    float *co_fm6 = (float*)malloc(64 * 112 * 112 * sizeof(float));
-    float *co_fm7 = (float*)malloc(32 * 112 * 112 * sizeof(float));
+    co_fm4 = (float*)malloc(64 * 56 * 56 * sizeof(float));
+    co_fm5 = (float*)malloc(64 * 56 * 56 * sizeof(float));
+    co_fm6 = (float*)malloc(64 * 112 * 112 * sizeof(float));
+    co_fm7 = (float*)malloc(32 * 112 * 112 * sizeof(float));
 
     // run network for each image
     for (int n = 0; n < nimg; ++n) {
+
         float *input = inputs + n * 224 * 224;
         float *output = outputs + n * 2 * 112 * 112;
         conv(input, ll_fm1, ll_conv1_w, ll_conv1_b, 224, 224, 64, 1, 2);
