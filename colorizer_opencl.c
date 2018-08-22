@@ -1,5 +1,6 @@
 #include <CL/cl.h>
 #include "colorizer.h"
+#include <stdio.h>
 
 #define RELU 0
 #define SIGMOID 1
@@ -12,13 +13,42 @@
 cl_platform_id platform;
 cl_device_id device;
 cl_context context;
-cl_uint err;
+cl_int err;
 cl_command_queue queue;
 cl_program program;
 cl_kernel kernel_conv;
 cl_kernel kernel_fc;
 cl_kernel kernel_fuse;
 cl_kernel kernel_upsample;
+
+#define CHECK_ERROR(err) \
+  if (err != CL_SUCCESS) { \
+    printf("[%s:%d] OpenCL error %d\n", __FILE__, __LINE__, err); \
+    exit(EXIT_FAILURE); \
+  }
+
+char *get_source_code(const char *file_name, size_t *len) {
+  char *source_code;
+  size_t length;
+  FILE *file = fopen(file_name, "r");
+  if (file == NULL) {
+    printf("[%s:%d] Failed to open %s\n", __FILE__, __LINE__, file_name);
+    exit(EXIT_FAILURE);
+  }
+
+  fseek(file, 0, SEEK_END);
+  length = (size_t)ftell(file);
+  rewind(file);
+
+  source_code = (char *)malloc(length + 1);
+  fread(source_code, length, 1, file);
+  source_code[length] = '\0';
+
+  fclose(file);
+
+  *len = length;
+  return source_code;
+}
 
 void colorizer_init() {
     /*
@@ -28,7 +58,7 @@ void colorizer_init() {
      */
     char *source_code;
     size_t len;
-    int i;
+//    int i;
 
     //get platform and device IDs
     err = clGetPlatformIDs(1, &platform, NULL);
@@ -62,12 +92,12 @@ void colorizer_init() {
     kernel_conv = clCreateKernel(program, "conv", &err);
     kernel_fc = clCreateKernel(program, "fc", &err);
     kernel_fuse = clCreateKernel(program, "fuse", &err);
-    kernel_upsample = clCreateKernel(program, "upsample", &err);
+    kernel_upsample = clCreateKernel(program, "up_sample", &err);
     CHECK_ERROR(err);
-
+	free(source_code);
 }
 
-cl_men ClCreateBuffer(cl_context context, cl_mem_flags flags, size_t size, void *host_ptr, cl_int *errcode_ret)
+cl_mem ClCreateBuffer(cl_context context, cl_mem_flags flags, size_t size, void *host_ptr, cl_int *errcode_ret)
 {
 	cl_mem buf;
 	buf = clCreateBuffer(context, flags, size, host_ptr, errcode_ret);
@@ -92,7 +122,6 @@ static void conv(cl_mem in_buff, cl_mem out_buff,
             int act_func_type
         ){
     int Hout = H / stride, Wout = W / stride;
-    int CHW = Hout * Wout * K;
     //break down matrix into 16x16 matrix
     //output matrix will be Wout x Hout
     int Wout_align = align(Wout, 16);
@@ -131,14 +160,6 @@ static void conv(cl_mem in_buff, cl_mem out_buff,
     CHECK_ERROR(err);
 }
 
-cm_mem buffer_init(float *in, int H, int W){
-    //create buffer
-    //TODO
-    in_buff = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * C * W * H, NULL, &err);
-    CHECK_ERROR(err);
-    return in_buff;
-}
-
 static void fc(cl_mem in_buff, cl_mem out_buff,
         cl_mem weight_buff, cl_mem bias_buff,
         int K, int C, int act_func_type
@@ -150,7 +171,7 @@ static void fc(cl_mem in_buff, cl_mem out_buff,
     //break down matrix into 16x16 matrix
     //output matrix will be Wout x Hout
     int K_align = align(K, 256);
-    size_t global_size[3] = {K, 1, 1};    
+    size_t global_size[3] = {K_align, 1, 1};    
     size_t local_size[3] = {256, 1, 1};
    
     //pass arguements
@@ -216,15 +237,11 @@ static void upsample(cl_mem in_buff, cl_mem out_buff,
     CHECK_ERROR(err);
     err = clSetKernelArg(kernel_upsample, 1, sizeof(cl_mem), &out_buff);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel_upsample, 2, sizeof(cl_mem), &weight_buff);
+    err = clSetKernelArg(kernel_upsample, 2, sizeof(int), &H);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel_upsample, 3, sizeof(cl_mem), &bias_buff);
+    err = clSetKernelArg(kernel_upsample, 3, sizeof(int), &W);
     CHECK_ERROR(err);
-    err = clSetKernelArg(kernel_upsample, 4, sizeof(int), &K);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel_upsample, 5, sizeof(int), &C);
-    CHECK_ERROR(err);
-    err = clSetKernelArg(kernel_upsample, 6, sizeof(int), &act_func_type);
+    err = clSetKernelArg(kernel_upsample, 4, sizeof(int), &C);
     CHECK_ERROR(err);
 
     err = clEnqueueNDRangeKernel(
@@ -251,6 +268,7 @@ cl_mem create_network_buffer(int size, float **network){
             sizeof(float) * size, *network, 0, NULL, NULL);
     CHECK_ERROR(err);
     *network += size;
+	return buff;
 }
 
 void colorizer(int nimg, float *network, float *inputs, float *outputs) {
@@ -286,7 +304,7 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     cl_mem ll_conv4_b = create_network_buffer(256, &network); 
     cl_mem ll_conv5_w = create_network_buffer(256 * 256 * 3 * 3, &network);
     cl_mem ll_conv5_b = create_network_buffer(256, &network); 
-    cl_mem ll_conv6_w = create_network_buffer(512 * 256 * 3 * 3, &network) 
+    cl_mem ll_conv6_w = create_network_buffer(512 * 256 * 3 * 3, &network); 
     cl_mem ll_conv6_b = create_network_buffer(512, &network); 
     cl_mem ml_conv1_w = create_network_buffer(512 * 512 * 3 * 3, &network);
     cl_mem ml_conv1_b = create_network_buffer(512, &network);
@@ -294,9 +312,9 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     cl_mem ml_conv2_b = create_network_buffer(256, &network); 
     cl_mem gf_conv1_w = create_network_buffer(512 * 512 * 3 * 3, &network);
     cl_mem gf_conv1_b = create_network_buffer(512, &network); 
-    cl_mem gf_conv2_w = create_network_buffer(512 * 512 * 3 * 3, &network) 
+    cl_mem gf_conv2_w = create_network_buffer(512 * 512 * 3 * 3, &network);
     cl_mem gf_conv2_b = create_network_buffer(512, &network); 
-    cl_mem gf_conv3_w = create_network_buffer(512 * 512 * 3 * 3, &network) 
+    cl_mem gf_conv3_w = create_network_buffer(512 * 512 * 3 * 3, &network);
     cl_mem gf_conv3_b = create_network_buffer(512, &network); 
     cl_mem gf_conv4_w = create_network_buffer(512 * 512 * 3 * 3, &network);
     cl_mem gf_conv4_b = create_network_buffer(512, &network); 
@@ -352,7 +370,9 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
 	//
 
     cl_mem init_buf = ClCreateBuffer(context, 0, 224 * 224 * 1 * sizeof(float), NULL, &err);
-	
+    cl_mem out_buf = ClCreateBuffer(context, 0, 224 * 224 * 1 * sizeof(float), NULL, &err);
+
+
     for (int n = 0; n < nimg; ++n) {
         /*
          *  static void conv(cl_mem &in_buff, cl_mem &out_buff,
@@ -363,10 +383,15 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
          *  in : (C, H, W)
          *  out : (K, H / stride, W / stride)
          *
-         */			
+         */
+
         float *input = inputs + n * 224 * 224;
         float *output = outputs + n * 2 * 112 * 112;
-        conv(input, ll_fm1, ll_conv1_w, ll_conv1_b, 224, 224, 64, 1, 2, RELU);
+
+		err = clEnqueueWriteBuffer(queue, init_buf, CL_TRUE, 0, sizeof(float)*224*224, input, 0, NULL, NULL);
+		CHECK_ERROR(err);
+
+        conv(init_buf, ll_fm1, ll_conv1_w, ll_conv1_b, 224, 224, 64, 1, 2, RELU);
         conv(ll_fm1, ll_fm2, ll_conv2_w, ll_conv2_b, 112, 112, 128, 64, 1, RELU);
         conv(ll_fm2, ll_fm3, ll_conv3_w, ll_conv3_b, 112, 112, 128, 128, 2, RELU);
         conv(ll_fm3, ll_fm4, ll_conv4_w, ll_conv4_b, 56, 56, 256, 128, 1, RELU);
@@ -393,12 +418,13 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
         conv(co_fm4, co_fm5, co_conv4_w, co_conv4_b, 56, 56, 64, 64, 1, RELU);
         upsample(co_fm5, co_fm6, 56, 56, 64);
         conv(co_fm6, co_fm7, co_conv5_w, co_conv5_b, 112, 112, 32, 64, 1, RELU);
-        conv(co_fm7, output, co_conv6_w, co_conv6_b, 112, 112, 2, 32, 1, SIGMOID);
+        conv(co_fm7, out_buf, co_conv6_w, co_conv6_b, 112, 112, 2, 32, 1, SIGMOID);
         //sigmoid(output, 2 * 112 * 112);
+		err = clEnqueueReadBuffer(queue, out_buf, CL_TRUE, 0, sizeof(float)*112*112*2,output , 0, NULL, NULL);
+		CHECK_ERROR(err);
     }
 
     //TODO release all that buffers
-    free(source_code);
     clReleaseKernel(kernel_conv);
     clReleaseKernel(kernel_fc);
     clReleaseKernel(kernel_fuse);
