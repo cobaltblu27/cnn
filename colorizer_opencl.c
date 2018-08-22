@@ -16,6 +16,51 @@ cl_command_queue queue;
 cl_program program;
 cl_kernel kernel;
 
+void colorizer_init() {
+    /*
+     * TODO
+     * Initialize OpenCL objects as global variables. For example,
+     * clGetPlatformIDs(1, &platform, NULL);
+     */
+    char *source_code;
+    size_t len;
+    int i;
+
+    //get platform and device IDs
+    err = clGetPlatformIDs(1, &platform, NULL);
+    CHECK_ERROR(err);
+    err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
+    CHECK_ERROR(err);
+    context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
+    CHECK_ERROR(err);
+    
+    //make queue, program and build
+    source_code = get_source_code("kernel.cl", &len);
+    queue = clCreateCommandQueue(context, device, 0, &err);
+    CHECK_ERROR(err);
+    program = clCreateProgramWithSource(context, 1, (const char**)&source_code, NULL, &err);
+    CHECK_ERROR(err);
+    err = clBuildProgram(program, 1, &device, "-cl-fast-relaxed-math -Werror", NULL, NULL);
+
+    //check compile error
+    if(err == CL_BUILD_PROGRAM_FAILURE){
+        size_t log_size;
+        char *log;
+        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
+        log = (char *)malloc(log_size + 1);
+        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+        log[log_size] = '\0';
+        printf("Compile error:\n%s\n", log);
+        free(log);
+    }
+
+    //create kernel
+    kernel = clCreateKernel(program, "colorize", &err);
+    CHECK_ERROR(err);
+
+}
+
+
 static void conv(float *in, float *out, float *weight, float *bias,
             int H, int W, int K, int C, int stride,
             int act_func_type, int CHW
@@ -156,50 +201,6 @@ static void upsample(float *in, float *out, int H, int W, int C) {
  * sigmoid :
  *   out = 1 / (1 + expf(-in));
  */
-void colorizer_init() {
-    /*
-     * TODO
-     * Initialize OpenCL objects as global variables. For example,
-     * clGetPlatformIDs(1, &platform, NULL);
-     */
-    char *source_code;
-    size_t len;
-    int i;
-
-    //get platform and device IDs
-    err = clGetPlatformIDs(1, &platform, NULL);
-    CHECK_ERROR(err);
-    err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
-    CHECK_ERROR(err);
-    context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
-    CHECK_ERROR(err);
-    
-    //make queue, program and build
-    source_code = get_source_code("kernel.cl", &len);
-    queue = clCreateCommandQueue(context, device, 0, &err);
-    CHECK_ERROR(err);
-    program = clCreateProgramWithSource(context, 1, (const char**)&source_code, NULL, &err);
-    CHECK_ERROR(err);
-    err = clBuildProgram(program, 1, &device, "-cl-fast-relaxed-math -Werror", NULL, NULL);
-
-    //check compile error
-    if(err == CL_BUILD_PROGRAM_FAILURE){
-        size_t log_size;
-        char *log;
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-        log = (char *)malloc(log_size + 1);
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
-        log[log_size] = '\0';
-        printf("Compile error:\n%s\n", log);
-        free(log);
-    }
-
-    //create kernel
-    kernel = clCreateKernel(program, "colorize", &err);
-    CHECK_ERROR(err);
-
-}
-
 void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     /*
      * TODO
@@ -222,74 +223,7 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
      * and 3 by 3 filter
      * H and W stands for height and width
      */
-    float *ll_conv1_w = network; network += 64 * 1 * 3 * 3;
-    float *ll_conv1_b = network; network += 64;
-    float *ll_conv2_w = network; network += 128 * 64 * 3 * 3;
-    float *ll_conv2_b = network; network += 128;
-    float *ll_conv3_w = network; network += 128 * 128 * 3 * 3;
-    float *ll_conv3_b = network; network += 128;
-    float *ll_conv4_w = network; network += 256 * 128 * 3 * 3;
-    float *ll_conv4_b = network; network += 256;
-    float *ll_conv5_w = network; network += 256 * 256 * 3 * 3;
-    float *ll_conv5_b = network; network += 256;
-    float *ll_conv6_w = network; network += 512 * 256 * 3 * 3;
-    float *ll_conv6_b = network; network += 512;
-    float *ml_conv1_w = network; network += 512 * 512 * 3 * 3;
-    float *ml_conv1_b = network; network += 512;
-    float *ml_conv2_w = network; network += 256 * 512 * 3 * 3;
-    float *ml_conv2_b = network; network += 256;
-    float *gf_conv1_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv1_b = network; network += 512;
-    float *gf_conv2_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv2_b = network; network += 512;
-    float *gf_conv3_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv3_b = network; network += 512;
-    float *gf_conv4_w = network; network += 512 * 512 * 3 * 3;
-    float *gf_conv4_b = network; network += 512;
-    float *gf_fc1_w = network; network += 1024 * 25088;
-    float *gf_fc1_b = network; network += 1024;
-    float *gf_fc2_w = network; network += 512 * 1024;
-    float *gf_fc2_b = network; network += 512;
-    float *gf_fc3_w = network; network += 256 * 512;
-    float *gf_fc3_b = network; network += 256;
-    float *co_conv1_w = network; network += 256 * 512 * 3 * 3;
-    float *co_conv1_b = network; network += 256;
-    float *co_conv2_w = network; network += 128 * 256 * 3 * 3;
-    float *co_conv2_b = network; network += 128;
-    float *co_conv3_w = network; network += 64 * 128 * 3 * 3;
-    float *co_conv3_b = network; network += 64;
-    float *co_conv4_w = network; network += 64 * 64 * 3 * 3;
-    float *co_conv4_b = network; network += 64;
-    float *co_conv5_w = network; network += 32 * 64 * 3 * 3;
-    float *co_conv5_b = network; network += 32;
-    float *co_conv6_w = network; network += 2 * 32 * 3 * 3;
-    float *co_conv6_b = network; network += 2;
-
     // intermediate buffer for feature maps
-    float *ll_fm1 = (float*)malloc(64 * 112 * 112 * sizeof(float));
-    float *ll_fm2 = (float*)malloc(128 * 112 * 112 * sizeof(float));
-    float *ll_fm3 = (float*)malloc(128 * 56 * 56 * sizeof(float));
-    float *ll_fm4 = (float*)malloc(256 * 56 * 56 * sizeof(float));
-    float *ll_fm5 = (float*)malloc(256 * 28 * 28 * sizeof(float));
-    float *ll_fm6 = (float*)malloc(512 * 28 * 28 * sizeof(float));
-    float *ml_fm1 = (float*)malloc(512 * 28 * 28 * sizeof(float));
-    float *ml_fm2 = (float*)malloc(256 * 28 * 28 * sizeof(float));
-    float *gf_fm1 = (float*)malloc(512 * 14 * 14 * sizeof(float));
-    float *gf_fm2 = (float*)malloc(512 * 14 * 14 * sizeof(float));
-    float *gf_fm3 = (float*)malloc(512 * 7 * 7 * sizeof(float));
-    float *gf_fm4 = (float*)malloc(512 * 7 * 7 * sizeof(float));
-    float *gf_fm5 = (float*)malloc(1024 * sizeof(float));
-    float *gf_fm6 = (float*)malloc(512 * sizeof(float));
-    float *gf_fm7 = (float*)malloc(256 * sizeof(float));
-    float *ml_gf_fused_fm = (float*)malloc(512 * 28 * 28 * sizeof(float));
-    float *co_fm1 = (float*)malloc(256 * 28 * 28 * sizeof(float));
-    float *co_fm2 = (float*)malloc(128 * 28 * 28 * sizeof(float));
-    float *co_fm3 = (float*)malloc(128 * 56 * 56 * sizeof(float));
-    float *co_fm4 = (float*)malloc(64 * 56 * 56 * sizeof(float));
-    float *co_fm5 = (float*)malloc(64 * 56 * 56 * sizeof(float));
-    float *co_fm6 = (float*)malloc(64 * 112 * 112 * sizeof(float));
-    float *co_fm7 = (float*)malloc(32 * 112 * 112 * sizeof(float));
-
     // run network for each image
     for (int n = 0; n < nimg; ++n) {
         float *input = inputs + n * 224 * 224;
