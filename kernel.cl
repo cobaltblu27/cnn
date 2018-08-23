@@ -12,11 +12,11 @@
 
 __kernel void activation(int type, __global float *inout,
         int size_k, int size_h, int size_w){
-    int k = get_global_id(0);
+    int w = get_global_id(0);
     int h = get_global_id(1);
-    int w = get_global_id(2);
+    int k = get_global_id(2);
     int index = k * size_h * size_w + h * size_w + w;
-    if(k < size_k && h < size_h && w < size_w){
+    if( w < size_w && h < size_h && k < size_k ){
         if(type == RELU){
             inout[index] = fmax(inout[index], 0);
         }else if(type == SIGMOID){
@@ -24,6 +24,22 @@ __kernel void activation(int type, __global float *inout,
         }
     }
 }
+
+__kernel void activator(int type, __global float *inout,
+        int size_k, int size_h, int size_w){
+    int w = get_global_id(2);
+    int h = get_global_id(1);
+    int k = get_global_id(0);
+    int index = k * size_h * size_w + h * size_w + w;
+    if( w < size_w && h < size_h && k < size_k ){
+        if(type == RELU){
+            inout[index] = fmax(inout[index], 0);
+        }else if(type == SIGMOID){
+            inout[index] = 1 / (1 + exp(-inout[index]));
+        }
+    }
+}
+
 
 __kernel void conv(
         __global float *in,
@@ -36,11 +52,11 @@ __kernel void conv(
     
 	int HOUT = H / stride, WOUT = W / stride;
 	int CHW = C*HOUT*WOUT;
-	int k = get_global_id(0);
+	int wout = get_global_id(0);
 	int hout = get_global_id(1);
-    int wout = get_global_id(2);
+    int k = get_global_id(2);
 
-	if( k < K && hout < HOUT && wout < WOUT) {
+	if( wout < WOUT && hout < HOUT && k < K) {
 		float sum = bias[k];
 		for (int c = 0; c < C; ++c){
 			for (int r = 0; r < 3; ++r) {
@@ -76,7 +92,7 @@ __kernel void fc(
             sum += weight[C * k + c] * in[c];
         out[k] = sum;
     }
-    activation(act_func_type, out, K, 1, 1);
+    activator(act_func_type, out, K, 1, 1);
 }
 /*
  * workgroup: (256, 28, 28)
@@ -103,10 +119,10 @@ __kernel void up_sample(
         __global float *out,
         int H, int W, int C
         ){
+    int w = get_global_id(0);
     int h = get_global_id(1);
-    int w = get_global_id(2);
-    int c = get_global_id(0);
-    if(c < C && h < H && w < W){
+    int c = get_global_id(2);
+    if(w < W && h < H && c < C){
         float t = in[c * H * W + h * W + w];
         out[c * H * W * 4 + (2 * h + 0) * W * 2 + (2 * w + 0)] = t;
         out[c * H * W * 4 + (2 * h + 0) * W * 2 + (2 * w + 1)] = t;

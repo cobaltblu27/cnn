@@ -20,12 +20,20 @@ cl_kernel kernel_conv;
 cl_kernel kernel_fc;
 cl_kernel kernel_fuse;
 cl_kernel kernel_upsample;
+cl_ulong start_time;
+cl_ulong end_time;
 
 #define CHECK_ERROR(err) \
   if (err != CL_SUCCESS) { \
     printf("[%s:%d] OpenCL error %d\n", __FILE__, __LINE__, err); \
     exit(EXIT_FAILURE); \
   }
+
+inline double get_time() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec + (double)1.0e-6*tv.tv_usec;
+}
 
 char *get_source_code(const char *file_name, size_t *len) {
   char *source_code;
@@ -90,8 +98,11 @@ void colorizer_init() {
 
     //create kernel
     kernel_conv = clCreateKernel(program, "conv", &err);
+    CHECK_ERROR(err);
     kernel_fc = clCreateKernel(program, "fc", &err);
+    CHECK_ERROR(err);
     kernel_fuse = clCreateKernel(program, "fuse", &err);
+    CHECK_ERROR(err);
     kernel_upsample = clCreateKernel(program, "up_sample", &err);
     CHECK_ERROR(err);
 	free(source_code);
@@ -126,8 +137,8 @@ static void conv(cl_mem in_buff, cl_mem out_buff,
     //output matrix will be Wout x Hout
     int Wout_align = align(Wout, 16);
     int Hout_align = align(Hout, 16);
-    size_t global_size[3] = {K, Wout_align, Hout_align};    
-    size_t local_size[3] = {1, 16, 16};
+    size_t global_size[3] = { Wout_align, Hout_align, K};    
+    size_t local_size[3] = {16, 16, 1};
    
     //pass arguements
     err = clSetKernelArg(kernel_conv, 0, sizeof(cl_mem), &in_buff);
@@ -138,6 +149,8 @@ static void conv(cl_mem in_buff, cl_mem out_buff,
     CHECK_ERROR(err);
     err = clSetKernelArg(kernel_conv, 3, sizeof(cl_mem), &bias_buff);
     CHECK_ERROR(err);
+//    err = clSetKernelArg(kernel_conv, 4, sizeof(weight_buff), NULL);
+ //   CHECK_ERROR(err);
     err = clSetKernelArg(kernel_conv, 4, sizeof(int), &H);
     CHECK_ERROR(err);
     err = clSetKernelArg(kernel_conv, 5, sizeof(int), &W);
@@ -229,8 +242,8 @@ static void upsample(cl_mem in_buff, cl_mem out_buff,
     //output matrix will be Wout x Hout
     int H_align = align(H, 16);
     int W_align = align(W, 16);
-    size_t global_size[3] = {C, H_align, W_align};    
-    size_t local_size[3] = {1, 16, 16};
+    size_t global_size[3] = {W_align, H_align, C};    
+    size_t local_size[3] = {16, 16, 1};
    
     //pass arguements
     err = clSetKernelArg(kernel_upsample, 0, sizeof(cl_mem), &in_buff);
@@ -251,13 +264,18 @@ static void upsample(cl_mem in_buff, cl_mem out_buff,
             );
     CHECK_ERROR(err);
 }
-/*
- * relu : 
- *   out = fmaxf(in, 0);
- * sigmoid :
- *   out = 1 / (1 + expf(-in));
- */
 
+/*
+ * Sigmoid (in-place)
+ * inout : (C, H, W)
+ */
+/*
+static void sigmoid(float *inout, int CHW) {
+    for (int chw = 0; chw < CHW; ++chw) {
+        inout[chw] = 1 / (1 + expf(-inout[chw]));
+    }
+}
+*/
 #define FILTER_SIZE 3
 
 cl_mem create_network_buffer(int size, float **network){
@@ -372,7 +390,10 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
     cl_mem init_buf = ClCreateBuffer(context, 0, 224 * 224 * 1 * sizeof(float), NULL, &err);
     cl_mem out_buf = ClCreateBuffer(context, 0, 224 * 224 * 1 * sizeof(float), NULL, &err);
 
-
+    // time measuring variables
+    double start_time1, start_time2, start_time3, start_time4, start_time5;
+    double end_time1, end_time2, end_time3, end_time4, end_time5;
+ 
     for (int n = 0; n < nimg; ++n) {
         /*
          *  static void conv(cl_mem &in_buff, cl_mem &out_buff,
@@ -384,14 +405,18 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
          *  out : (K, H / stride, W / stride)
          *
          */
-
         float *input = inputs + n * 224 * 224;
         float *output = outputs + n * 2 * 112 * 112;
-
+       
+        start_time1 = get_time();
 		err = clEnqueueWriteBuffer(queue, init_buf, CL_TRUE, 0, sizeof(float)*224*224, input, 0, NULL, NULL);
 		CHECK_ERROR(err);
+        end_time1 = get_time();
 
+        start_time2 = get_time();
         conv(init_buf, ll_fm1, ll_conv1_w, ll_conv1_b, 224, 224, 64, 1, 2, RELU);
+        end_time2 = get_time();
+
         conv(ll_fm1, ll_fm2, ll_conv2_w, ll_conv2_b, 112, 112, 128, 64, 1, RELU);
         conv(ll_fm2, ll_fm3, ll_conv3_w, ll_conv3_b, 112, 112, 128, 128, 2, RELU);
         conv(ll_fm3, ll_fm4, ll_conv4_w, ll_conv4_b, 56, 56, 256, 128, 1, RELU);
@@ -418,11 +443,23 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
         conv(co_fm4, co_fm5, co_conv4_w, co_conv4_b, 56, 56, 64, 64, 1, RELU);
         upsample(co_fm5, co_fm6, 56, 56, 64);
         conv(co_fm6, co_fm7, co_conv5_w, co_conv5_b, 112, 112, 32, 64, 1, RELU);
+
+        start_time3 = get_time();
         conv(co_fm7, out_buf, co_conv6_w, co_conv6_b, 112, 112, 2, 32, 1, SIGMOID);
-        //sigmoid(output, 2 * 112 * 112);
+        end_time3 = get_time();
+
+        start_time4 = get_time();
 		err = clEnqueueReadBuffer(queue, out_buf, CL_TRUE, 0, sizeof(float)*112*112*2,output , 0, NULL, NULL);
+        end_time4 = get_time();
+
 		CHECK_ERROR(err);
+        //sigmoid(output, 2 * 112 * 112);
     }
+
+    printf("time1: %lf sec\n", end_time1-start_time1);
+    printf("time2: %lf sec\n", end_time2-start_time2);
+    printf("time3: %lf sec\n", end_time3-start_time3);
+    printf("time4: %lf sec\n", end_time4-start_time4);
 
     //TODO release all that buffers
     clReleaseKernel(kernel_conv);
