@@ -1,0 +1,59 @@
+// Computing Speed Test
+Calculating... Time1 = 4.054980 sec
+Time2 = 3.197284 sec
+Time3 = 1.249254 sec
+Time4 = 0.000822 sec
+Time5 = 1.910067 sec
+
+Time1 = 0.507392 sec
+: conv + RELU
+
+Time2 = 0.029606 sec
+: FC
+
+Time3 = 0.000809 sec
+: fuse
+
+Time4 = 0.001306 sec
+: upsample
+
+Time5 = 0.000375 sec
+: sigmoid
+
+conv > FC > upsample > fuse > sigmoid
+(94%) (5%)  (0.25%)   (0.15%) (0.07%)
+
+0.507392 => 94.05
+0.029606 => 5.49
+0.001306 => 0.24
+0.000809 => 0.15
+0.000375 => 0.07
+
+tot = 0.539488
+
+
+//in-Lining Test
+w/o: 0.334949
+w/ : 0.350340
+=> 4% additional overhead
+
+# of 1
+read_time : 0.034761
+conv1_time: 0.001033
+conv2_time: 0.000028
+write_time: 0.228001
+tot: 0.341394
+=>
+# of 10
+read_time : 0.000149 => 0.000152
+conv1_time: 0.000014 => 0.000018
+conv2_time: 0.000011 => 0.000013
+write_time: 0.219036 => 0.066667
+tot: 2.337511 => 0.811872
+
+# of 100
+read_time : 0.000166 => 0.000129
+conv1_time: 0.000014 => 0.000014
+conv2_time: 0.000010 => 0.000009
+write_time: 0.216522 => 0.066789
+tot: 23. => 6.825458
