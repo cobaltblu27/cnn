@@ -456,10 +456,10 @@ void colorizer(int nimg, float *network, float *inputs, float *outputs) {
         //sigmoid(output, 2 * 112 * 112);
     }
 
-    printf("time1: %lf sec\n", end_time1-start_time1);
-    printf("time2: %lf sec\n", end_time2-start_time2);
-    printf("time3: %lf sec\n", end_time3-start_time3);
-    printf("time4: %lf sec\n", end_time4-start_time4);
+   // printf("time1: %lf sec\n", end_time1-start_time1);
+    //printf("time2: %lf sec\n", end_time2-start_time2);
+    //printf("time3: %lf sec\n", end_time3-start_time3);
+    //printf("time4: %lf sec\n", end_time4-start_time4);
 
     //TODO release all that buffers
     clReleaseKernel(kernel_conv);
